@@ -3,7 +3,7 @@ import os
 import math
 import mathutils
 
-OBJ_DIR = "D:\\1\\acg\\collision_sim\\output_18"
+OBJ_DIR = "D:\\1\\acg\\collision_sim\\output"
 SPHERE_FILE = os.path.join(OBJ_DIR, "sphere_pos.txt")
 COLLIDER_FILE = os.path.join(OBJ_DIR, "collider_transform.txt")
 SOLID_MESH_PATH = "D:\\1\\acg\\collision_sim\\bunny_200_subdivided_1.obj"

@@ -8,8 +8,8 @@
 | `benchmark.py` | Performance benchmarks: CPU vs CUDA, spatial-hash vs brute-force. |
 | `config.py` | Simulation parameters (time step, gravity, cloth size, etc.). |
 | `objects.py` | CPU physics: `ParticleSystem`, `Cloth`, `MeshCloth`, `MeshCollider`, `SphereBody`. |
-| `objects_cuda.py` | GPU (CUDA) physics kernels and wrappers using Numba. |
 | `spatial_hash.py` | Spatial-hash structure for neighbor queries / collision acceleration. |
+| `objects_cuda.py` | GPU physics: CUDA kernels, `ParticleSystemCUDA`, `MeshClothCUDA`, `MeshColliderCUDA`, and spatial-hash helpers. |
 | `mesh_generator.py` | Generates simple meshes (plane, curtain) and exports to OBJ. |
 | `render.py` | Blender import script for visualizing exported OBJ sequences. |
 | `utils.py` | Helpers: OBJ export/load functions. |
