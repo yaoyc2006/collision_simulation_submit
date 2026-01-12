@@ -16,6 +16,7 @@
 | `benchmark_exp1_cuda_vs_cpu.csv` | Benchmark results: CUDA vs CPU timing. |
 | `benchmark_exp2_hash_vs_brute.csv` | Benchmark results: spatial-hash vs brute-force. |
 | `benchmark_results.png` | Benchmark visualization chart. |
+| `collision_sim_final.mp4` | Video showing example simulation results and rendered output. |
 
 ## Usage
 
