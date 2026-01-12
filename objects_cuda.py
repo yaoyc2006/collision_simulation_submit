@@ -17,7 +17,6 @@ def apply_gravity_kernel(forces, inv_mass, gravity, num_particles):
 
 @cuda.jit
 def integrate_kernel(pos, vel, forces, inv_mass, dt, friction, num_particles):
-    """积分更新位置和速度的CUDA kernel"""
     i = cuda.grid(1)
     if i < num_particles:
         fx = forces[i, 0]
@@ -31,7 +30,6 @@ def integrate_kernel(pos, vel, forces, inv_mass, dt, friction, num_particles):
         if math.isnan(fz) or math.isinf(fz):
             fz = 0.0
         
-        # 更新速度
         acc_x = fx * inv_mass[i]
         acc_y = fy * inv_mass[i]
         acc_z = fz * inv_mass[i]
@@ -40,7 +38,6 @@ def integrate_kernel(pos, vel, forces, inv_mass, dt, friction, num_particles):
         vel[i, 1] = (vel[i, 1] + acc_y * dt) * friction
         vel[i, 2] = (vel[i, 2] + acc_z * dt) * friction
         
-        # NaN检查：如果速度是NaN，置零
         if math.isnan(vel[i, 0]) or math.isinf(vel[i, 0]):
             vel[i, 0] = 0.0
         if math.isnan(vel[i, 1]) or math.isinf(vel[i, 1]):
@@ -48,7 +45,6 @@ def integrate_kernel(pos, vel, forces, inv_mass, dt, friction, num_particles):
         if math.isnan(vel[i, 2]) or math.isinf(vel[i, 2]):
             vel[i, 2] = 0.0
         
-        # 限速
         max_vel = 30.0
         speed_sq = vel[i, 0]**2 + vel[i, 1]**2 + vel[i, 2]**2
         if speed_sq > max_vel * max_vel:
@@ -57,12 +53,10 @@ def integrate_kernel(pos, vel, forces, inv_mass, dt, friction, num_particles):
             vel[i, 1] *= scale
             vel[i, 2] *= scale
         
-        # 更新位置
         pos[i, 0] += vel[i, 0] * dt
         pos[i, 1] += vel[i, 1] * dt
         pos[i, 2] += vel[i, 2] * dt
         
-        # 清零力
         forces[i, 0] = 0.0
         forces[i, 1] = 0.0
         forces[i, 2] = 0.0
@@ -73,7 +67,6 @@ def compute_spring_forces_kernel(pos, vel, forces, inv_mass,
                                   spring_indices, spring_data,
                                   damping_factor, tension_scale, support_scale,
                                   num_springs):
-    """计算弹簧力的CUDA kernel"""
     s = cuda.grid(1)
     if s < num_springs:
         p1_idx = spring_indices[s, 0]
@@ -81,7 +74,6 @@ def compute_spring_forces_kernel(pos, vel, forces, inv_mass,
         rest_len = spring_data[s, 0]
         k = spring_data[s, 1]
         
-        # 计算delta
         dx = pos[p1_idx, 0] - pos[p2_idx, 0]
         dy = pos[p1_idx, 1] - pos[p2_idx, 1]
         dz = pos[p1_idx, 2] - pos[p2_idx, 2]
@@ -90,21 +82,17 @@ def compute_spring_forces_kernel(pos, vel, forces, inv_mass,
         if dist < 1e-6:
             return
         
-        # 方向
         dir_x = dx / dist
         dir_y = dy / dist
         dir_z = dz / dist
         
-        # 弹簧力 (正值表示拉伸)
         raw_force = k * (dist - rest_len)
         
-        # 拉伸力保持完整系数，支撑/压缩力减弱
         if raw_force >= 0:
             raw_force *= tension_scale
         else:
             raw_force *= support_scale
         
-        # 阻尼
         rel_vx = vel[p1_idx, 0] - vel[p2_idx, 0]
         rel_vy = vel[p1_idx, 1] - vel[p2_idx, 1]
         rel_vz = vel[p1_idx, 2] - vel[p2_idx, 2]
@@ -113,12 +101,10 @@ def compute_spring_forces_kernel(pos, vel, forces, inv_mass,
         
         total_force = raw_force + damping
         
-        # 弹簧力方向：取负，使其成为恢复力
         fx = -dir_x * total_force
         fy = -dir_y * total_force
         fz = -dir_z * total_force
         
-        # 原子加法应用力 (p1 += force, p2 -= force)
         cuda.atomic.add(forces, (p1_idx, 0), fx)
         cuda.atomic.add(forces, (p1_idx, 1), fy)
         cuda.atomic.add(forces, (p1_idx, 2), fz)
@@ -130,7 +116,6 @@ def compute_spring_forces_kernel(pos, vel, forces, inv_mass,
 @cuda.jit
 def stretch_limit_kernel(pos, inv_mass, spring_indices, spring_data,
                          stretch_limit, num_springs):
-    """拉伸限制的CUDA kernel"""
     s = cuda.grid(1)
     if s < num_springs:
         p1_idx = spring_indices[s, 0]
@@ -171,13 +156,12 @@ def stretch_limit_kernel(pos, inv_mass, spring_indices, spring_data,
 
 @cuda.jit
 def ground_collision_kernel(pos, vel, ground_y, num_particles):
-    """地面碰撞的CUDA kernel"""
     i = cuda.grid(1)
     if i < num_particles:
         if pos[i, 1] < ground_y:
             pos[i, 1] = ground_y
             vel[i, 1] *= -0.1
-            vel[i, 0] *= 0.95  # 减少地面摩擦
+            vel[i, 0] *= 0.95
             vel[i, 2] *= 0.95
 
 
@@ -186,10 +170,8 @@ def sphere_collision_kernel(pos, vel, inv_mass,
                             sphere_x, sphere_y, sphere_z,
                             sphere_vx, sphere_vy, sphere_vz,
                             threshold, num_particles):
-    """球体碰撞的CUDA kernel"""
     i = cuda.grid(1)
     if i < num_particles:
-        # 计算到球心的距离
         dx = pos[i, 0] - sphere_x
         dy = pos[i, 1] - sphere_y
         dz = pos[i, 2] - sphere_z
@@ -197,32 +179,24 @@ def sphere_collision_kernel(pos, vel, inv_mass,
         dist = math.sqrt(dx*dx + dy*dy + dz*dz)
         
         if dist < threshold and dist > 1e-6:
-            # 归一化法线
             nx = dx / dist
             ny = dy / dist
             nz = dz / dist
             
-            # 把粒子推到球面外
             pos[i, 0] = sphere_x + nx * threshold
             pos[i, 1] = sphere_y + ny * threshold
             pos[i, 2] = sphere_z + nz * threshold
             
-            # 速度反射
             vx = vel[i, 0]
             vy = vel[i, 1]
             vz = vel[i, 2]
             
-            # 法向速度分量 (使用球的速度) - 减少摩擦
             vel[i, 0] = sphere_vx + (vx - sphere_vx) * 0.98
             vel[i, 1] = sphere_vy + (vy - sphere_vy) * 0.98
             vel[i, 2] = sphere_vz + (vz - sphere_vz) * 0.98
 
-
-# ==================== 空间哈希优化的自碰撞 ====================
-
 @cuda.jit(device=True)
 def hash_cell(x, y, z, cell_size, grid_size):
-    """计算空间哈希索引"""
     cx = int(math.floor(x / cell_size)) % grid_size
     cy = int(math.floor(y / cell_size)) % grid_size
     cz = int(math.floor(z / cell_size)) % grid_size
@@ -234,7 +208,6 @@ def hash_cell(x, y, z, cell_size, grid_size):
 
 @cuda.jit
 def compute_cell_indices_kernel(pos, cell_indices, cell_size, grid_size, num_particles):
-    """计算每个粒子所属的格子索引"""
     i = cuda.grid(1)
     if i < num_particles:
         cell_indices[i] = hash_cell(pos[i, 0], pos[i, 1], pos[i, 2], cell_size, grid_size)
@@ -242,7 +215,6 @@ def compute_cell_indices_kernel(pos, cell_indices, cell_size, grid_size, num_par
 
 @cuda.jit
 def count_particles_per_cell_kernel(cell_indices, cell_counts, num_particles):
-    """统计每个格子中的粒子数量"""
     i = cuda.grid(1)
     if i < num_particles:
         cell = cell_indices[i]
@@ -251,7 +223,6 @@ def count_particles_per_cell_kernel(cell_indices, cell_counts, num_particles):
 
 @cuda.jit
 def clear_array_kernel(arr, size):
-    """清零数组的CUDA kernel"""
     i = cuda.grid(1)
     if i < size:
         arr[i] = 0
@@ -259,9 +230,7 @@ def clear_array_kernel(arr, size):
 
 @cuda.jit
 def compute_cell_offsets_kernel(cell_counts, cell_offsets, num_cells):
-    """计算每个格子在排序数组中的起始位置（前缀和）- 已废弃，使用CPU版本"""
-    # 简单的串行前缀和（在GPU上运行但单线程）
-    # 注意：这个kernel在GPU单线程运行非常慢！用CPU版本替代
+    # 这个kernel在GPU单线程运行非常慢, 用CPU版本替代
     i = cuda.grid(1)
     if i == 0:
         offset = 0
@@ -269,42 +238,30 @@ def compute_cell_offsets_kernel(cell_counts, cell_offsets, num_cells):
             cell_offsets[c] = offset
             offset += cell_counts[c]
 
-
-# 预分配CPU内存用于前缀和计算
 _cell_counts_buffer = None
 _cell_offsets_buffer = None
 
 def compute_cell_offsets_cpu(cell_counts_device, cell_offsets_device, num_cells):
-    """
-    在CPU上计算前缀和，然后传回GPU
-    使用预分配buffer避免每次都分配内存
-    """
     global _cell_counts_buffer, _cell_offsets_buffer
     
-    # 懒初始化buffer
     if _cell_counts_buffer is None or len(_cell_counts_buffer) < num_cells:
         _cell_counts_buffer = np.zeros(num_cells, dtype=np.int32)
         _cell_offsets_buffer = np.zeros(num_cells, dtype=np.int32)
     
-    # 从GPU获取数据到预分配buffer
     cell_counts_device.copy_to_host(_cell_counts_buffer[:num_cells])
     
-    # CPU上计算前缀和（使用numpy的cumsum）
     _cell_offsets_buffer[0] = 0
     _cell_offsets_buffer[1:num_cells] = np.cumsum(_cell_counts_buffer[:num_cells-1])
-    
-    # 传回GPU
+
     cell_offsets_device.copy_to_device(_cell_offsets_buffer[:num_cells])
 
 
 @cuda.jit
 def sort_particles_kernel(cell_indices, cell_offsets, cell_counts_temp, 
                           sorted_indices, num_particles):
-    """将粒子按格子排序"""
     i = cuda.grid(1)
     if i < num_particles:
         cell = cell_indices[i]
-        # 原子地获取该格子的下一个空位
         local_idx = cuda.atomic.add(cell_counts_temp, cell, 1)
         sorted_indices[cell_offsets[cell] + local_idx] = i
 
@@ -315,10 +272,6 @@ def self_collision_spatial_hash_kernel(pos, vel, inv_mass, adjacency_matrix,
                                        cell_offsets, cell_counts,
                                        collision_thickness, cell_size, grid_size,
                                        num_particles, num_cells):
-    """
-    基于空间哈希的自碰撞检测
-    只检查同一格子和相邻26个格子中的粒子
-    """
     i = cuda.grid(1)
     if i < num_particles:
         if inv_mass[i] <= 0:
@@ -328,7 +281,6 @@ def self_collision_spatial_hash_kernel(pos, vel, inv_mass, adjacency_matrix,
         py_i = pos[i, 1]
         pz_i = pos[i, 2]
         
-        # 计算粒子i所在的格子坐标
         cx = int(math.floor(px_i / cell_size))
         cy = int(math.floor(py_i / cell_size))
         cz = int(math.floor(pz_i / cell_size))
@@ -337,8 +289,6 @@ def self_collision_spatial_hash_kernel(pos, vel, inv_mass, adjacency_matrix,
         corr_y = 0.0
         corr_z = 0.0
         collision_count = 0
-        
-        # 检查27个相邻格子 (包括自身)
         for dx in range(-1, 2):
             for dy in range(-1, 2):
                 for dz in range(-1, 2):
@@ -354,7 +304,6 @@ def self_collision_spatial_hash_kernel(pos, vel, inv_mass, adjacency_matrix,
                     if cell_idx >= num_cells:
                         continue
                     
-                    # 遍历该格子中的所有粒子
                     start = cell_offsets[cell_idx]
                     count = cell_counts[cell_idx]
                     
@@ -365,19 +314,16 @@ def self_collision_spatial_hash_kernel(pos, vel, inv_mass, adjacency_matrix,
                             continue
                         if inv_mass[j] <= 0:
                             continue
-                        
-                        # 检查邻接矩阵
+
                         if adjacency_matrix[i, j] > 0:
                             continue
-                        
-                        # 距离检测
+
                         djx = px_i - pos[j, 0]
                         djy = py_i - pos[j, 1]
                         djz = pz_i - pos[j, 2]
                         
                         dist_sq = djx*djx + djy*djy + djz*djz
-                        
-                        # min_dist = collision_thickness * 2.0 (与CPU版本一致)
+
                         min_dist_sq = collision_thickness * collision_thickness * 4.0
                         if dist_sq < min_dist_sq and dist_sq > 1e-10:
                             dist = math.sqrt(dist_sq)
@@ -419,11 +365,8 @@ def self_collision_spatial_hash_kernel(pos, vel, inv_mass, adjacency_matrix,
 
 @cuda.jit
 def self_collision_kernel(pos, vel, inv_mass, adjacency_matrix, 
-                          collision_thickness, num_particles):
-    """
-    自碰撞检测的CUDA kernel (暴力版本，用于小网格或回退)
-    adjacency_matrix: 邻接矩阵，标记哪些粒子对是相邻的（不应该碰撞）
-    """
+                          collision_thickness, num_particles):  
+    # 暴力版本，用于小网格
     i = cuda.grid(1)
     if i < num_particles:
         if inv_mass[i] <= 0:
@@ -432,22 +375,18 @@ def self_collision_kernel(pos, vel, inv_mass, adjacency_matrix,
         px_i = pos[i, 0]
         py_i = pos[i, 1]
         pz_i = pos[i, 2]
-        
-        # 累积碰撞响应
+
         corr_x = 0.0
         corr_y = 0.0
         corr_z = 0.0
         collision_count = 0
-        
-        # 检查与其他所有粒子的碰撞
+
         for j in range(num_particles):
             if i == j:
                 continue
             if inv_mass[j] <= 0:
                 continue
             
-            # 检查是否是相邻粒子（通过弹簧连接）
-            # adjacency_matrix[i, j] = 1 表示相邻，不应碰撞
             if adjacency_matrix[i, j] > 0:
                 continue
             
@@ -456,80 +395,63 @@ def self_collision_kernel(pos, vel, inv_mass, adjacency_matrix,
             dz = pz_i - pos[j, 2]
             
             dist_sq = dx*dx + dy*dy + dz*dz
-            
-            # min_dist = collision_thickness * 2.0 (与CPU版本一致)
+
             min_dist_sq = collision_thickness * collision_thickness * 4.0
             if dist_sq < min_dist_sq and dist_sq > 1e-10:
                 dist = math.sqrt(dist_sq)
-                
-                # 归一化方向
+
                 nx = dx / dist
                 ny = dy / dist
                 nz = dz / dist
-                
-                # 计算穿透深度 (min_dist = collision_thickness * 2.0)
+
                 min_dist = collision_thickness * 2.0
                 penetration = min_dist - dist
-                
-                # 按质量权重分配修正
+
                 w_i = inv_mass[i]
                 w_j = inv_mass[j]
                 total_w = w_i + w_j
                 
                 if total_w > 0:
                     ratio_i = w_i / total_w
-                    # 推开粒子 i - 增强响应强度到1.5
                     corr_x += nx * penetration * ratio_i * 1.5
                     corr_y += ny * penetration * ratio_i * 1.5
                     corr_z += nz * penetration * ratio_i * 1.5
                     collision_count += 1
-                    
-                    # 法向速度阻尼
+
                     rel_vx = vel[i, 0] - vel[j, 0]
                     rel_vy = vel[i, 1] - vel[j, 1]
                     rel_vz = vel[i, 2] - vel[j, 2]
                     v_normal = rel_vx * nx + rel_vy * ny + rel_vz * nz
                     
-                    if v_normal < 0:  # 正在靠近
+                    if v_normal < 0:
                         damping = 0.8
                         vel[i, 0] -= nx * v_normal * damping * ratio_i
                         vel[i, 1] -= ny * v_normal * damping * ratio_i
                         vel[i, 2] -= nz * v_normal * damping * ratio_i
         
-        # 应用位置修正
         if collision_count > 0:
             pos[i, 0] += corr_x
             pos[i, 1] += corr_y
             pos[i, 2] += corr_z
-            # 注意：不再应用整体摩擦阻尼，避免多次迭代后速度衰减过大
-            # 法向阻尼已在上面的循环中应用
-
-
-# ==================== 主类 ====================
 
 class ParticleSystemCUDA:
-    """CUDA加速的粒子系统"""
     def __init__(self, num_particles):
         self.num = num_particles
         
-        # 在GPU上分配内存
         self.pos = cuda.to_device(np.zeros((num_particles, 3), dtype=np.float32))
         self.vel = cuda.to_device(np.zeros((num_particles, 3), dtype=np.float32))
         self.inv_mass = cuda.to_device(np.ones(num_particles, dtype=np.float32))
         self.forces = cuda.to_device(np.zeros((num_particles, 3), dtype=np.float32))
-        
-        # CUDA配置
+
         self.threads_per_block = 256
 
         
         self.blocks = (num_particles + self.threads_per_block - 1) // self.threads_per_block
 
     def set_positions(self, pos_cpu):
-        """从CPU设置位置"""
         self.pos = cuda.to_device(pos_cpu.astype(np.float32))
     
     def set_inv_mass(self, inv_mass_cpu):
-        """从CPU设置逆质量"""
         self.inv_mass = cuda.to_device(inv_mass_cpu.astype(np.float32))
 
     def apply_gravity(self, gravity):
@@ -545,28 +467,23 @@ class ParticleSystemCUDA:
         )
 
     def to_numpy(self):
-        """将位置数据传回CPU"""
         return self.pos.copy_to_host()
     
     def get_velocities(self):
-        """将速度数据传回CPU"""
         return self.vel.copy_to_host()
     
     def set_positions_partial(self, indices, new_pos):
-        """更新部分粒子的位置"""
         pos_cpu = self.pos.copy_to_host()
         pos_cpu[indices] = new_pos.astype(np.float32)
         self.pos = cuda.to_device(pos_cpu)
     
     def set_velocities_partial(self, indices, new_vel):
-        """更新部分粒子的速度"""
         vel_cpu = self.vel.copy_to_host()
         vel_cpu[indices] = new_vel.astype(np.float32)
         self.vel = cuda.to_device(vel_cpu)
 
 
 class MeshClothCUDA:
-    """CUDA加速的网格布料"""
     def __init__(self, obj_path, scale=1.0, offset=(0, 0, 0), rotation=(0, 0, 0)):
         print(f"Loading mesh from {obj_path} (CUDA mode)...")
         raw_verts, raw_faces = load_obj_mesh(obj_path)
@@ -576,8 +493,7 @@ class MeshClothCUDA:
         print(f"Mesh loaded: {num_particles} vertices, {len(raw_faces)} faces.")
         
         self.particles = ParticleSystemCUDA(num_particles)
-        
-        # 在CPU上进行初始化变换
+
         pos_cpu = raw_verts.astype(np.float32) * scale
         
         rx, ry, rz = np.deg2rad(rotation)
@@ -607,8 +523,7 @@ class MeshClothCUDA:
         particle_mass = total_mass / num_particles
         inv_mass_cpu = np.ones(num_particles, dtype=np.float32) / particle_mass
         self.particles.set_inv_mass(inv_mass_cpu)
-        
-        # === 构建弹簧网络 ===
+
         spring_indices = []
         spring_data = []
         existing_links = set()
@@ -627,8 +542,7 @@ class MeshClothCUDA:
             spring_indices.append([i, j])
             spring_data.append([rest_len, k])
             existing_links.add((i, j))
-        
-        # 结构弹簧
+
         print("Building Structural Springs...")
         edge_to_faces = {}
         for fi, face in enumerate(self.faces):
@@ -641,8 +555,7 @@ class MeshClothCUDA:
                 if edge_key not in edge_to_faces:
                     edge_to_faces[edge_key] = []
                 edge_to_faces[edge_key].append((fi, idx1, idx2))
-        
-        # 弯曲弹簧
+
         print("Building Bending Springs...")
         for edge_key, face_list in edge_to_faces.items():
             if len(face_list) == 2:
@@ -657,24 +570,19 @@ class MeshClothCUDA:
         
         self.num_springs = len(spring_indices)
         print(f"Springs built: {self.num_springs} constraints (CUDA).")
-        
-        # 传到GPU
+
         self.spring_indices = cuda.to_device(np.array(spring_indices, dtype=np.int32))
         self.spring_data = cuda.to_device(np.array(spring_data, dtype=np.float32))
-        
-        # 自碰撞参数 - 从 Config 读取或使用默认值（必须在 _build_adjacency 之前设置）
+
         config_thickness = getattr(Config, 'self_collision_thickness', 0.05)
         self.collision_thickness = config_thickness
-        
-        # 自动调整 thickness (如果配置的太大的话)
+
         if self.num_springs > 0:
             edge_lens = [s[0] for s in spring_data]
             avg_edge_len = np.mean(edge_lens)
             min_edge_len = np.min(edge_lens)
             print(f"Mesh statistics: Avg edge length = {avg_edge_len:.4f}, Min edge length = {min_edge_len:.4f}")
-            
-            # 限制 thickness 最大为 min_edge_len * 0.45
-            # 这样 min_dist = 2 * thickness = 0.9 * min_edge_len < min_edge_len
+
             max_allowed_thickness = min_edge_len * 0.45
             
             if config_thickness > max_allowed_thickness:
@@ -682,49 +590,34 @@ class MeshClothCUDA:
                 self.collision_thickness = max_allowed_thickness
 
         self.enable_self_collision = True
-        
-        # 为自碰撞准备邻接信息
+
         self._build_adjacency(spring_indices, num_particles)
-        
-        # CUDA配置
+
         self.threads_per_block = 256
         self.spring_blocks = (self.num_springs + self.threads_per_block - 1) // self.threads_per_block
     
     def _build_adjacency(self, spring_indices, num_particles):
-        """构建邻接矩阵用于自碰撞检测"""
-        # 创建邻接矩阵 (稀疏表示太复杂，用简单数组)
         adjacency = np.zeros((num_particles, num_particles), dtype=np.int8)
         
         for i, j in spring_indices:
             adjacency[i, j] = 1
             adjacency[j, i] = 1
-        
-        # 只标记一阶邻居（直接通过弹簧连接的），不再排除二阶邻居
-        # 这样可以检测到更多的碰撞，减少边缘穿透
-        # adjacency2 = adjacency @ adjacency
-        # adjacency = np.clip(adjacency + adjacency2, 0, 1).astype(np.int8)
-        
+               
         self.adjacency_gpu = cuda.to_device(adjacency)
-        
-        # 也准备单独的弹簧索引数组（用于优化版kernel）
+
         spring_arr = np.array(spring_indices, dtype=np.int32)
         self.spring_p1_gpu = cuda.to_device(spring_arr[:, 0].copy())
         self.spring_p2_gpu = cuda.to_device(spring_arr[:, 1].copy())
         
-        # === 空间哈希数据结构 ===
         self.use_spatial_hash = num_particles > 500  # 粒子多时使用空间哈希
         if self.use_spatial_hash:
             self._init_spatial_hash(num_particles)
     
     def _init_spatial_hash(self, num_particles):
-        """初始化空间哈希数据结构"""
-        # 格子大小应略大于碰撞检测距离 (min_dist = thickness * 2.0)
-        # 设为2.5x以确保相邻格子能覆盖所有潜在碰撞
         self.cell_size = self.collision_thickness * 1.5
-        self.grid_size = 64  # 增大网格到 64x64x64
+        self.grid_size = 64
         self.num_cells = self.grid_size ** 3
-        
-        # 分配GPU内存
+
         self.cell_indices = cuda.to_device(np.zeros(num_particles, dtype=np.int32))
         self.sorted_indices = cuda.to_device(np.zeros(num_particles, dtype=np.int32))
         self.cell_counts = cuda.to_device(np.zeros(self.num_cells, dtype=np.int32))
@@ -734,48 +627,40 @@ class MeshClothCUDA:
         print(f"Spatial hash initialized: grid {self.grid_size}^3, cell_size={self.cell_size:.3f}")
     
     def _update_spatial_hash(self):
-        """更新空间哈希"""
         num_particles = self.particles.num
         blocks = self.particles.blocks
         tpb = self.threads_per_block
-        
-        # 重置计数 - 使用GPU kernel清零，避免重新分配内存
+
         cell_blocks = (self.num_cells + tpb - 1) // tpb
         clear_array_kernel[cell_blocks, tpb](self.cell_counts, self.num_cells)
         clear_array_kernel[cell_blocks, tpb](self.cell_counts_temp, self.num_cells)
-        
-        # 1. 计算每个粒子的格子索引
+
         compute_cell_indices_kernel[blocks, tpb](
             self.particles.pos, self.cell_indices, 
             self.cell_size, self.grid_size, num_particles
         )
-        
-        # 2. 统计每个格子的粒子数
+
         count_particles_per_cell_kernel[blocks, tpb](
             self.cell_indices, self.cell_counts, num_particles
         )
-        
-        # 3. 计算前缀和（格子偏移）- 使用CPU版本更快
+
         compute_cell_offsets_cpu(self.cell_counts, self.cell_offsets, self.num_cells)
-        
-        # 4. 按格子排序粒子
+
         sort_particles_kernel[blocks, tpb](
             self.cell_indices, self.cell_offsets, self.cell_counts_temp,
             self.sorted_indices, num_particles
         )
 
     def solve_constraints(self):
-        """CUDA加速的约束求解"""
-        # 计算弹簧力
+
         compute_spring_forces_kernel[self.spring_blocks, self.threads_per_block](
             self.particles.pos, self.particles.vel, self.particles.forces,
             self.particles.inv_mass, self.spring_indices, self.spring_data,
-            3.0,  # damping_factor - 适中阻尼
+            3.0,  # damping_factor
             Config.tension_scale, Config.support_scale,
             self.num_springs
         )
-        
-        # 拉伸限制
+
         for _ in range(Config.stretch_limit_iters):
             stretch_limit_kernel[self.spring_blocks, self.threads_per_block](
                 self.particles.pos, self.particles.inv_mass,
@@ -785,34 +670,25 @@ class MeshClothCUDA:
             )
 
     def update(self, dt):
-        # 应用重力
         self.particles.apply_gravity(Config.gravity)
-        
-        # 求解约束
+
         self.solve_constraints()
         
-        # 积分
         self.particles.integrate(dt, Config.friction)
-        
-        # 自碰撞检测 - 使用配置的迭代次数
+
         if self.enable_self_collision:
             iters = getattr(Config, 'self_collision_iters', 2)
             self.solve_self_collision(iterations=iters)
-        
-        # 地面碰撞
+
         ground_collision_kernel[self.particles.blocks, self.threads_per_block](
             self.particles.pos, self.particles.vel, 0.0, self.particles.num
         )
     
     def solve_self_collision(self, iterations=2):
-        """CUDA加速的自碰撞检测"""
         if self.use_spatial_hash:
-            # 使用空间哈希优化版本
             for _ in range(iterations):
-                # 更新空间哈希
                 self._update_spatial_hash()
-                
-                # 基于空间哈希的碰撞检测
+
                 self_collision_spatial_hash_kernel[self.particles.blocks, self.threads_per_block](
                     self.particles.pos, self.particles.vel, self.particles.inv_mass,
                     self.adjacency_gpu, self.cell_indices, self.sorted_indices,
@@ -829,117 +705,87 @@ class MeshClothCUDA:
                 )
 
     def get_positions_cpu(self):
-        """获取CPU上的位置数据"""
         return self.particles.to_numpy()
     
     def get_velocities_cpu(self):
-        """获取CPU上的速度数据"""
         return self.particles.get_velocities()
     
     def set_positions_partial(self, indices, new_pos):
-        """更新部分粒子的位置"""
         self.particles.set_positions_partial(indices, new_pos)
     
     def set_velocities_partial(self, indices, new_vel):
-        """更新部分粒子的速度"""
         self.particles.set_velocities_partial(indices, new_vel)
     
     def solve_sphere_collision(self, sphere):
-        """在GPU上处理球体碰撞，并计算反作用力给球"""
         threshold = sphere.radius + 0.06
-        
-        # 先获取碰撞前的位置用于计算反作用力
+
         pos_before = self.particles.to_numpy()
-        
-        # GPU碰撞检测
+
         sphere_collision_kernel[self.particles.blocks, self.threads_per_block](
             self.particles.pos, self.particles.vel, self.particles.inv_mass,
             float(sphere.pos[0]), float(sphere.pos[1]), float(sphere.pos[2]),
             float(sphere.vel[0]), float(sphere.vel[1]), float(sphere.vel[2]),
             threshold, self.particles.num
         )
-        
-        # 获取碰撞后的位置
+
         pos_after = self.particles.to_numpy()
-        
-        # 计算位置变化（碰撞响应）
         delta_pos = pos_after - pos_before
-        
-        # 检测哪些粒子发生了碰撞（位置有变化的）
+
         collision_mask = np.linalg.norm(delta_pos, axis=1) > 1e-6
         num_colliding = np.sum(collision_mask)
         
         if num_colliding > 0:
-            # 计算平均碰撞方向（从球心指向粒子）
             diffs = pos_after[collision_mask] - sphere.pos
             dists = np.linalg.norm(diffs, axis=1)
             dists[dists < 1e-6] = 1e-6
             normals = diffs / dists[:, np.newaxis]
-            
-            # 反作用力：布料推球
-            # 力的方向是碰撞法线的反方向（指向球心）
+
             avg_normal = np.mean(normals, axis=0)
             drag_force = -avg_normal * num_colliding * 0.5
-            
-            # 应用到球的速度
+
             sphere.vel += drag_force * sphere.inv_mass * Config.dt
-
-
-# ==================== Mesh Collider CUDA Kernels ====================
 
 @cuda.jit(device=True)
 def closest_point_on_triangle_device(px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz):
-    """计算点到三角形最近点的设备函数"""
-    # 向量 AB, AC, AP
     abx, aby, abz = bx - ax, by - ay, bz - az
     acx, acy, acz = cx - ax, cy - ay, cz - az
     apx, apy, apz = px - ax, py - ay, pz - az
-    
-    # 点积
+
     d1 = abx * apx + aby * apy + abz * apz
     d2 = acx * apx + acy * apy + acz * apz
-    
-    # 顶点 A 区域
+
     if d1 <= 0.0 and d2 <= 0.0:
         return ax, ay, az
-    
-    # 向量 BP
+
     bpx, bpy, bpz = px - bx, py - by, pz - bz
     d3 = abx * bpx + aby * bpy + abz * bpz
     d4 = acx * bpx + acy * bpy + acz * bpz
-    
-    # 顶点 B 区域
+
     if d3 >= 0.0 and d4 <= d3:
         return bx, by, bz
-    
-    # 边 AB 区域
+
     vc = d1 * d4 - d3 * d2
     if vc <= 0.0 and d1 >= 0.0 and d3 <= 0.0:
         v = d1 / (d1 - d3 + 1e-10)
         return ax + abx * v, ay + aby * v, az + abz * v
-    
-    # 向量 CP
+
     cpx, cpy, cpz = px - cx, py - cy, pz - cz
     d5 = abx * cpx + aby * cpy + abz * cpz
     d6 = acx * cpx + acy * cpy + acz * cpz
-    
-    # 顶点 C 区域
+
     if d6 >= 0.0 and d5 <= d6:
         return cx, cy, cz
-    
-    # 边 AC 区域
+
     vb = d5 * d2 - d1 * d6
     if vb <= 0.0 and d2 >= 0.0 and d6 <= 0.0:
         w = d2 / (d2 - d6 + 1e-10)
         return ax + acx * w, ay + acy * w, az + acz * w
-    
-    # 边 BC 区域
+
     va = d3 * d6 - d5 * d4
     if va <= 0.0 and (d4 - d3) >= 0.0 and (d5 - d6) >= 0.0:
         w = (d4 - d3) / ((d4 - d3) + (d5 - d6) + 1e-10)
         return bx + (cx - bx) * w, by + (cy - by) * w, bz + (cz - bz) * w
-    
-    # 内部区域
+
     denom = 1.0 / (va + vb + vc + 1e-10)
     v = vb * denom
     w = vc * denom
@@ -950,7 +796,6 @@ def closest_point_on_triangle_device(px, py, pz, ax, ay, az, bx, by, bz, cx, cy,
 def mesh_collision_kernel(particle_pos, particle_vel, particle_inv_mass,
                           mesh_verts, mesh_faces, tri_centers, tri_radii,
                           thickness, num_particles, num_triangles):
-    """Mesh-cloth 碰撞检测的 CUDA kernel"""
     i = cuda.grid(1)
     if i >= num_particles:
         return
@@ -960,10 +805,8 @@ def mesh_collision_kernel(particle_pos, particle_vel, particle_inv_mass,
     px = particle_pos[i, 0]
     py = particle_pos[i, 1]
     pz = particle_pos[i, 2]
-    
-    # 遍历所有三角形（后续可用空间哈希优化）
+
     for tri_idx in range(num_triangles):
-        # 快速距离检查
         cx = tri_centers[tri_idx, 0]
         cy = tri_centers[tri_idx, 1]
         cz = tri_centers[tri_idx, 2]
@@ -976,8 +819,7 @@ def mesh_collision_kernel(particle_pos, particle_vel, particle_inv_mass,
         
         if dist_sq >= radius * radius:
             continue
-        
-        # 获取三角形顶点
+
         f0 = mesh_faces[tri_idx, 0]
         f1 = mesh_faces[tri_idx, 1]
         f2 = mesh_faces[tri_idx, 2]
@@ -985,20 +827,17 @@ def mesh_collision_kernel(particle_pos, particle_vel, particle_inv_mass,
         ax, ay, az = mesh_verts[f0, 0], mesh_verts[f0, 1], mesh_verts[f0, 2]
         bx, by, bz = mesh_verts[f1, 0], mesh_verts[f1, 1], mesh_verts[f1, 2]
         cx, cy, cz = mesh_verts[f2, 0], mesh_verts[f2, 1], mesh_verts[f2, 2]
-        
-        # 计算最近点
+
         cpx, cpy, cpz = closest_point_on_triangle_device(
             px, py, pz, ax, ay, az, bx, by, bz, cx, cy, cz
         )
-        
-        # 计算距离
+
         delta_x = px - cpx
         delta_y = py - cpy
         delta_z = pz - cpz
         dist = math.sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z)
         
         if dist < 1e-8:
-            # 粒子在三角形上，沿法线推离
             abx, aby, abz = bx - ax, by - ay, bz - az
             acx, acy, acz = cx - ax, cy - ay, cz - az
             nx = aby * acz - abz * acy
@@ -1016,8 +855,7 @@ def mesh_collision_kernel(particle_pos, particle_vel, particle_inv_mass,
         
         if dist >= thickness:
             continue
-        
-        # 碰撞响应：推开粒子
+
         nx = delta_x / dist
         ny = delta_y / dist
         nz = delta_z / dist
@@ -1026,8 +864,7 @@ def mesh_collision_kernel(particle_pos, particle_vel, particle_inv_mass,
         particle_pos[i, 0] += nx * correction
         particle_pos[i, 1] += ny * correction
         particle_pos[i, 2] += nz * correction
-        
-        # 速度阻尼（缓和以减少皱褶）
+
         particle_vel[i, 0] *= 0.6
         particle_vel[i, 1] *= 0.6
         particle_vel[i, 2] *= 0.6
@@ -1038,7 +875,6 @@ def mesh_collision_spatial_hash_kernel(particle_pos, particle_vel, particle_inv_
                                        mesh_verts, mesh_faces, tri_centers, tri_radii,
                                        tri_cell_offsets, tri_cell_counts, tri_sorted_indices,
                                        thickness, cell_size, grid_size, num_particles, num_cells):
-    """Mesh-cloth 碰撞检测（使用三角形空间哈希）"""
     i = cuda.grid(1)
     if i >= num_particles:
         return
@@ -1049,12 +885,10 @@ def mesh_collision_spatial_hash_kernel(particle_pos, particle_vel, particle_inv_
     py = particle_pos[i, 1]
     pz = particle_pos[i, 2]
 
-    # 计算所在格子坐标
     gx = int(math.floor(px / cell_size)) % grid_size
     gy = int(math.floor(py / cell_size)) % grid_size
     gz = int(math.floor(pz / cell_size)) % grid_size
 
-    # 枚举邻接 27 个格子
     for dz in (-1, 0, 1):
         nz = gz + dz
         if nz < 0:
@@ -1082,7 +916,6 @@ def mesh_collision_spatial_hash_kernel(particle_pos, particle_vel, particle_inv_
                 for k in range(count):
                     tri_idx = tri_sorted_indices[start + k]
 
-                    # 快速球体距离剪枝
                     cx = tri_centers[tri_idx, 0]
                     cy = tri_centers[tri_idx, 1]
                     cz = tri_centers[tri_idx, 2]
@@ -1094,7 +927,6 @@ def mesh_collision_spatial_hash_kernel(particle_pos, particle_vel, particle_inv_
                     if dist_sq >= radius * radius:
                         continue
 
-                    # 获取三角形顶点
                     f0 = mesh_faces[tri_idx, 0]
                     f1 = mesh_faces[tri_idx, 1]
                     f2 = mesh_faces[tri_idx, 2]
@@ -1113,7 +945,6 @@ def mesh_collision_spatial_hash_kernel(particle_pos, particle_vel, particle_inv_
                     dist = math.sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z)
 
                     if dist < 1e-8:
-                        # 粒子在三角形上，沿法线推离
                         abx, aby, abz = bx - ax, by - ay, bz - az
                         acx, acy, acz = cx2 - ax, cy2 - ay, cz2 - az
                         nxn = aby * acz - abz * acy
@@ -1145,10 +976,6 @@ def mesh_collision_spatial_hash_kernel(particle_pos, particle_vel, particle_inv_
 
 
 class MeshColliderCUDA:
-    """CUDA加速的Mesh碰撞体
-    
-    支持物理驱动的运动：质量、重力、碰撞冲量。
-    """
     def __init__(self, obj_path, scale=1.0, offset=(0, 0, 0), rotation=(0, 0, 0), thickness=0.05, mass=1.0):
         verts, faces = load_obj_mesh(obj_path)
         
@@ -1174,17 +1001,14 @@ class MeshColliderCUDA:
         self.torque = np.array([0.0, 0.0, 0.0], dtype=np.float32)
         
         self._update_verts()
-        
-        # GPU数据
+
         self.faces_gpu = cuda.to_device(self.faces_cpu)
         self.verts_gpu = cuda.to_device(self.verts.astype(np.float32))
         self.centers_gpu = cuda.to_device(self.centers.astype(np.float32))
         self.radii_gpu = cuda.to_device(self.radii.astype(np.float32))
-        
-        # CUDA配置
+
         self.threads_per_block = 256
 
-        # 三角形空间哈希
         self.tri_use_spatial_hash = self.num_triangles > 64
         if self.tri_use_spatial_hash:
             self._init_triangle_spatial_hash()
@@ -1192,7 +1016,6 @@ class MeshColliderCUDA:
         print(f"MeshColliderCUDA initialized: {len(verts)} verts, {self.num_triangles} triangles")
     
     def _update_verts(self):
-        """根据当前位置和旋转更新顶点位置"""
         total_rot = self.rotation_init + self.rot
         rx, ry, rz = np.deg2rad(total_rot)
         
@@ -1203,26 +1026,21 @@ class MeshColliderCUDA:
         
         verts = self.verts_original @ R.T
         self.verts = verts + self.offset_init + self.pos
-        
-        # 计算三角形中心和半径
+
         tris = self.verts[self.faces_cpu]
         self.centers = np.mean(tris, axis=1).astype(np.float32)
         self.radii = np.linalg.norm(tris - self.centers[:, np.newaxis, :], axis=2).max(axis=1).astype(np.float32)
     
     def _sync_to_gpu(self):
-        """将更新后的顶点数据同步到GPU"""
         self.verts_gpu = cuda.to_device(self.verts.astype(np.float32))
         self.centers_gpu = cuda.to_device(self.centers.astype(np.float32))
         self.radii_gpu = cuda.to_device(self.radii.astype(np.float32))
 
     def _init_triangle_spatial_hash(self):
-        """为三角形（triangle centers）初始化空间哈希数据结构"""
-        # 格子大小与布料/三角形碰撞厚度相关
         self.tri_cell_size = self.thickness * 1.5
         self.tri_grid_size = 64
         self.tri_num_cells = self.tri_grid_size ** 3
 
-        # 三角形索引与排序缓冲
         self.tri_cell_indices = cuda.to_device(np.zeros(self.num_triangles, dtype=np.int32))
         self.tri_sorted_indices = cuda.to_device(np.zeros(self.num_triangles, dtype=np.int32))
         self.tri_cell_counts = cuda.to_device(np.zeros(self.tri_num_cells, dtype=np.int32))
@@ -1232,25 +1050,20 @@ class MeshColliderCUDA:
         print(f"Triangle spatial hash initialized: grid {self.tri_grid_size}^3, cell_size={self.tri_cell_size:.3f}")
 
     def _update_triangle_spatial_hash(self):
-        """更新三角形的空间哈希（用于 mesh-cloth 碰撞加速）"""
         tpb = self.threads_per_block
-        # 清零计数
         cell_blocks = (self.tri_num_cells + tpb - 1) // tpb
         clear_array_kernel[cell_blocks, tpb](self.tri_cell_counts, self.tri_num_cells)
         clear_array_kernel[cell_blocks, tpb](self.tri_cell_counts_temp, self.tri_num_cells)
 
-        # 计算三角形中心的格子索引
         blocks = (self.num_triangles + tpb - 1) // tpb
         compute_cell_indices_kernel[blocks, tpb](
             self.centers_gpu, self.tri_cell_indices, self.tri_cell_size, self.tri_grid_size, self.num_triangles
         )
 
-        # 统计每个格子中的三角形数量
         count_particles_per_cell_kernel[blocks, tpb](
             self.tri_cell_indices, self.tri_cell_counts, self.num_triangles
         )
 
-        # 计算偏移并排序
         compute_cell_offsets_cpu(self.tri_cell_counts, self.tri_cell_offsets, self.tri_num_cells)
         sort_particles_kernel[blocks, tpb](
             self.tri_cell_indices, self.tri_cell_offsets, self.tri_cell_counts_temp,
@@ -1259,7 +1072,6 @@ class MeshColliderCUDA:
         cuda.synchronize()
     
     def update(self, dt, gravity=None):
-        """更新固体运动"""
         if gravity is None:
             gravity = np.array([0.0, -9.8, 0.0], dtype=np.float32)
         
@@ -1274,45 +1086,30 @@ class MeshColliderCUDA:
             self.angular_vel += np.rad2deg(angular_accel) * dt
             self.angular_vel *= self.damping
             self.rot += self.angular_vel * dt
-        
-        # 更新顶点并同步到GPU
+
         self._update_verts()
         self._sync_to_gpu()
-        
-        # 重置力
+
         self.force.fill(0.0)
         self.torque.fill(0.0)
     
     def collide(self, cloth_or_particles, iterations=2):
-        """CUDA加速的mesh-cloth碰撞检测
-        
-        Args:
-            cloth_or_particles: MeshClothCUDA对象 或 ParticleSystemCUDA对象
-            iterations: 碰撞迭代次数
-        """
-        # 支持传入 cloth 对象或直接传入 particles
         if hasattr(cloth_or_particles, 'particles'):
-            # 传入的是 cloth 对象
             particles = cloth_or_particles.particles
         else:
-            # 传入的是 particles 对象
             particles = cloth_or_particles
         
         num_particles = particles.num
         blocks = (num_particles + self.threads_per_block - 1) // self.threads_per_block
 
-        # 记录碰撞前位置用于计算冲量
         pos_before = particles.pos.copy_to_host()
         
         for _ in range(iterations):
-            # 确保用于 mesh-cloth 碰撞的 thickness 大于或等于布料自碰撞的距离
             mult = getattr(Config, 'mesh_cloth_collision_multiplier', 1.5)
             cloth_th = getattr(Config, 'self_collision_thickness', 0.05)
             effective_thickness = max(self.thickness, cloth_th * mult)
 
-            # 如果启用了三角形空间哈希，优先使用哈希版本以减少三角形遍历
             if hasattr(self, 'tri_use_spatial_hash') and self.tri_use_spatial_hash:
-                # 更新三角形哈希并调用哈希加速的kernel
                 self._update_triangle_spatial_hash()
                 mesh_collision_spatial_hash_kernel[blocks, self.threads_per_block](
                     particles.pos, particles.vel, particles.inv_mass,
@@ -1328,20 +1125,15 @@ class MeshColliderCUDA:
                     float(effective_thickness), num_particles, self.num_triangles
                 )
 
-        # 计算碰撞冲量并反馈给 collider 速度
         if self.inv_mass > 0:
             pos_after = particles.pos.copy_to_host()
             delta_pos = pos_after - pos_before
-            # 检测哪些粒子发生了碰撞（位置有变化）
             collision_mask = np.linalg.norm(delta_pos, axis=1) > 1e-6
             num_colliding = np.sum(collision_mask)
             if num_colliding > 0:
-                # 平均碰撞方向（从 collider 指向粒子）
                 avg_delta = np.mean(delta_pos[collision_mask], axis=0)
-                # 冲量大小与碰撞粒子数和位移成正比
-                impulse_strength = 0.05  # 可调参数
+                impulse_strength = 0.05
                 impulse = avg_delta * num_colliding * impulse_strength
-                # 应用到 collider 速度（反方向）
                 self.vel -= impulse * self.inv_mass
 
 
