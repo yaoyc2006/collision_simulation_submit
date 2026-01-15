@@ -121,5 +121,5 @@ python main.py
 	- The script attempts to use GPU (`bpy.context.scene.cycles.device = 'GPU'`); modify or remove that line to force CPU rendering if needed.
 	- If Blender fails to find files, double-check `OBJ_DIR` and `SOLID_MESH_PATH` are correct and readable.
 	- Confirm render scale (Important):
-		- Set `SOLID_MESH_SCALE` 、 in `render.py` to match the `scale` parameter used in `main.py` when creating  `MeshCollider`.
+		- Set `SOLID_MESH_SCALE` in `render.py` to match the `scale` parameter used in `main.py` when creating  `MeshCollider`.
 		- Example: if `main.py` uses `MeshCollider(..., scale=20.0, ...)`, then use `SOLID_MESH_SCALE = 20.0` for the solid collider.
